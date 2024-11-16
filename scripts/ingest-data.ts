@@ -1,52 +1,103 @@
-import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
-import { OpenAIEmbeddings } from 'langchain/embeddings/openai';
-import { Chroma } from 'langchain/vectorstores/chroma';
-import { chroma } from '@/utils/chroma-client';
-import { CustomPDFLoader } from '@/utils/customPDFLoader';
-import { DirectoryLoader } from 'langchain/document_loaders/fs/directory';
-import { OpenAIEmbeddingFunction } from 'chromadb';
-import { CHROMA_COLLECTION, OPENAI_API_KEY } from '@/config/env';
-import { OPENAI_MODEL_NAME } from '@/config/env';
+import { loadEnvFile } from 'node:process';
+loadEnvFile(process.cwd() + '/.env');
 
-/* Name of directory to retrieve your files from */
-const filePath = 'docs';
+import fs from 'node:fs';
+import { v4 as uuidv4 } from 'uuid';
+import { PineconeService } from '@/src/utils/pinecone';
+import { EmbeddingService } from '@/src/utils/openai';
+import { config } from '@/src/utils';
 
-export const run = async () => {
-  try {
-    /*load raw docs from the all files in the directory */
-    const directoryLoader = new DirectoryLoader(filePath, {
-      '.pdf': (path) => new CustomPDFLoader(path),
-    });
+class MarkdownProcessor {
+  constructor(
+    private embeddingService: EmbeddingService,
+    private pineconeService: PineconeService,
+    private config: AppConfig,
+  ) {}
 
-    // const loader = new PDFLoader(filePath);
-    const rawDocs = await directoryLoader.load();
+  private parseMarkdownSections(markdownSummaries: string[]): Array<{
+    title: string;
+    content: string;
+    timestamp: string;
+  }> {
+    const sections: Array<{
+      title: string;
+      content: string;
+      timestamp: string;
+    }> = [];
 
-    /* Split text into chunks */
-    const textSplitter = new RecursiveCharacterTextSplitter({
-      chunkSize: 1000,
-      chunkOverlap: 200,
-    });
+    for (const videoSummary of markdownSummaries) {
+      const parsedSections = videoSummary.split('## ').filter(Boolean);
 
-    const docs = await textSplitter.splitDocuments(rawDocs);
-    console.log('split docs');
+      for (const section of parsedSections) {
+        const [title, content] = section.split('\n', 2);
+        const timestampMatch = title.match(/\((\d{2}:\d{2}:\d{2})\)/);
+        const timestamp = timestampMatch
+          ? timestampMatch[1]
+          : '_start_time_not_provided_';
 
-    console.log('creating vector store...');
-    /*create and store the embeddings in the vectorStore*/
-    const embeddings = new OpenAIEmbeddings();
-    const embeddingss = new OpenAIEmbeddingFunction(OPENAI_API_KEY, OPENAI_MODEL_NAME);
-    const collection = await chroma.getOrCreateCollection(CHROMA_COLLECTION,{}, embeddingss);
+        sections.push({
+          title: title.replace(/\[.*?\]/g, '').trim(),
+          content: content || '',
+          timestamp,
+        });
+      }
+    }
 
-    //embed the PDF documents
-    await Chroma.fromDocuments(docs, embeddings, {
-      collectionName: collection.name,
-    });
-  } catch (error) {
-    console.error('error', error);
-    throw new Error('Failed to ingest your data');
+    return sections;
   }
-};
 
-(async () => {
-  await run();
-  console.log('ingestion complete');
-})();
+  async processMarkdownFile(filePath: string) {
+    const rawData = fs.readFileSync(
+      process.cwd() + '/scripts/' + filePath,
+      'utf8',
+    );
+    const markdownSummaries = JSON.parse(rawData);
+
+    const sections = this.parseMarkdownSections(markdownSummaries);
+
+    const vectors = [];
+    let i = 0;
+    console.log('Sections: ', sections.length);
+    for (const section of sections) {
+      console.log(
+        `Length of content: ${section.content.length}, index: ${i++}`,
+      );
+      const embedding = await this.embeddingService.generateEmbedding(
+        section.content,
+      );
+      vectors.push({
+        id: uuidv4(),
+        values: embedding,
+        metadata: {
+          title: section.title,
+          timestamp: section.timestamp,
+          content: section.content,
+        },
+      });
+
+      if (vectors.length >= this.config.batchSize) {
+        await this.pineconeService.upsertVectors(vectors);
+        console.log(`Upserted ${vectors.length} vectors.`);
+        vectors.length = 0;
+      }
+    }
+
+    if (vectors.length > 0) {
+      await this.pineconeService.upsertVectors(vectors);
+      console.log(`Upserted ${vectors.length} vectors.`);
+    }
+  }
+}
+
+const embeddingService = new EmbeddingService(config);
+const pineconeService = new PineconeService(config);
+const markdownProcessor = new MarkdownProcessor(
+  embeddingService,
+  pineconeService,
+  config,
+);
+
+markdownProcessor
+  .processMarkdownFile('./md.json')
+  .then(() => console.log('Data ingestion complete!'))
+  .catch((err) => console.error('Error during ingestion:', err));

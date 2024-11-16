@@ -1,51 +1,66 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { OpenAIEmbeddings } from 'langchain/embeddings/openai';
-import { Chroma } from 'langchain/vectorstores/chroma';
-import { makeChain } from '@/utils/makechain';
-import { chroma } from '@/utils/chroma-client';
-import { OpenAIEmbeddingFunction } from 'chromadb';
-import { CHROMA_COLLECTION, OPENAI_API_KEY, OPENAI_MODEL_NAME } from '@/config/env';
+import { PineconeService } from '@/src/utils/pinecone';
+import { config as appConfig } from '@/src/utils';
+import { EmbeddingService } from '@/src/utils/openai';
+
+type ResponseData = {
+  message?: string;
+  answer?: string;
+  question?: string;
+};
+
+type RequestBody = {
+  question: string;
+  history: ChatHistory;
+};
+
+const pineconeService = new PineconeService(appConfig);
+const openaiService = new EmbeddingService(appConfig);
 
 export default async function handler(
   req: NextApiRequest,
-  res: NextApiResponse,
+  res: NextApiResponse<ResponseData>,
 ) {
-  const { question, history } = req.body;
-
-  //only accept post requests
-  if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method not allowed' });
-    return;
+  if (req.method != 'POST') {
+    res.status(405).json({ message: 'Method not allowed' });
   }
-
+  const { question, history = [] }: RequestBody = await req.body;
   if (!question) {
-    return res.status(400).json({ message: 'No question in the request' });
+    return res.status(400).json({ message: 'Query is required' });
   }
-  // OpenAI recommends replacing newlines with spaces for best results
-  const sanitizedQuestion = question.trim().replaceAll('\n', ' ');
 
   try {
-    const embeddings = new OpenAIEmbeddingFunction(OPENAI_API_KEY, OPENAI_MODEL_NAME);
-    const collection = await chroma.getCollection(CHROMA_COLLECTION, embeddings);
+    const queryEmbedding = await openaiService.generateEmbedding(question);
+    const searchResponse = await pineconeService.query(queryEmbedding);
 
-    /* create vectorstore*/
-    const vectorStore = await Chroma.fromExistingCollection(
-      new OpenAIEmbeddings({}),
-      {
-        collectionName: collection.name
-      },
-    );
-    //create chain
-    const chain = makeChain(vectorStore);
-    //Ask a question using chat history
-    const response = await chain.call({
-      question: sanitizedQuestion,
-      chat_history: history || [],
+    const contexts =
+      searchResponse.matches?.map((match) => match.metadata.content) || [];
+
+    if (contexts.length === 0) {
+      return res.json({ message: 'No relevant data found.' });
+    }
+    const prompt = `
+User Question: ${question}
+Provided context: ${contexts.join('\n---\n')}`;
+
+    history.push({
+      role: 'user',
+      content: prompt,
     });
 
-    res.status(200).json(response);
-  } catch (error: any) {
-    console.error('error', error);
-    res.status(500).json({ error: error.message || 'Something went wrong' });
+    const answer = await openaiService.completion(history);
+    res.status(200).json({ answer, question: prompt });
+  } catch (error) {
+    console.error('Error processing QnA:', error);
+    return res.json({ message: 'Failed to process the query.' });
   }
 }
+
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '1mb',
+    },
+  },
+  maxDuration: 60,
+};

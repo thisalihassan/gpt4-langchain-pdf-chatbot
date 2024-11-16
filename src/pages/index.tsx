@@ -5,13 +5,6 @@ import { Message } from '@/types/chat';
 import Image from 'next/image';
 import ReactMarkdown from 'react-markdown';
 import LoadingDots from '@/src/components/ui/LoadingDots';
-import { Document } from 'langchain/document';
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/src/components/ui/accordion';
 
 export default function Home() {
   const [query, setQuery] = useState<string>('');
@@ -20,8 +13,7 @@ export default function Home() {
   const [messageState, setMessageState] = useState<{
     messages: Message[];
     pending?: string;
-    history: [string, string][];
-    pendingSourceDocs?: Document[];
+    history: ChatHistory;
   }>({
     messages: [
       {
@@ -81,8 +73,8 @@ export default function Home() {
       });
       const data = await response.json();
 
-      if (data.error) {
-        setError(data.error);
+      if (data.message) {
+        setError(data.message);
       } else {
         setMessageState((state) => ({
           ...state,
@@ -90,17 +82,19 @@ export default function Home() {
             ...state.messages,
             {
               type: 'apiMessage',
-              message: data.text,
-              sourceDocs: data.sourceDocuments,
+              message: data.answer,
             },
           ],
-          history: [...state.history, [question, data.text]],
+          history: [
+            ...state.history,
+            { role: 'user', content: data.question },
+            { role: 'assistant', content: data.answer },
+          ],
         }));
       }
 
       setLoading(false);
 
-      //scroll to bottom
       messageListRef.current?.scrollTo(0, messageListRef.current.scrollHeight);
     } catch (error) {
       setLoading(false);
@@ -109,7 +103,6 @@ export default function Home() {
     }
   }
 
-  //prevent empty submissions
   const handleEnter = (e: any) => {
     if (e.key === 'Enter' && query) {
       handleSubmit(e);
@@ -156,7 +149,6 @@ export default function Home() {
                         priority
                       />
                     );
-                    // The latest message sent by the user will be animated while waiting for a response
                     className =
                       loading && index === messages.length - 1
                         ? styles.usermessagewaiting
@@ -172,36 +164,6 @@ export default function Home() {
                           </ReactMarkdown>
                         </div>
                       </div>
-                      {message.sourceDocs && (
-                        <div
-                          className="p-5"
-                          key={`sourceDocsAccordion-${index}`}
-                        >
-                          <Accordion
-                            type="single"
-                            collapsible
-                            className="flex-col"
-                          >
-                            {message.sourceDocs.map((doc, index) => (
-                              <div key={`messageSourceDocs-${index}`}>
-                                <AccordionItem value={`item-${index}`}>
-                                  <AccordionTrigger>
-                                    <h3>Source {index + 1}</h3>
-                                  </AccordionTrigger>
-                                  <AccordionContent>
-                                    <ReactMarkdown linkTarget="_blank">
-                                      {doc.pageContent}
-                                    </ReactMarkdown>
-                                    <p className="mt-2">
-                                      <b>Source:</b> {doc.metadata.source}
-                                    </p>
-                                  </AccordionContent>
-                                </AccordionItem>
-                              </div>
-                            ))}
-                          </Accordion>
-                        </div>
-                      )}
                     </Fragment>
                   );
                 })}

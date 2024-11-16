@@ -10,29 +10,27 @@
     "build": "next build",
     "start": "next start",
     "type-check": "tsc --noEmit",
-    "lint": "eslint --ignore-path .gitignore \"**/*.+(ts|js|tsx)\"",
-    "format": "prettier --ignore-path .gitignore \"**/*.+(ts|js|tsx)\" --write",
-    "ingest": "tsx -r dotenv/config scripts/ingest-data.ts",
-    "delete": "tsx -r dotenv/config scripts/delete-collection.ts"
+    "ingest": "tsx scripts/ingest-data.ts"
   },
   "dependencies": {
-    "@microsoft/fetch-event-source": "^2.0.1",
+    "@pinecone-database/pinecone": "^4.0.0",
     "@radix-ui/react-accordion": "^1.1.1",
-    "chromadb": "^1.4.1",
     "clsx": "^1.2.1",
     "dotenv": "^16.0.3",
-    "langchain": "^0.0.62",
+    "eventsource-parser": "^3.0.0",
+    "fs": "^0.0.1-security",
     "lucide-react": "^0.125.0",
     "next": "13.2.3",
-    "openai": "^3.2.1",
+    "openai": "^4.72.0",
     "pdf-parse": "1.1.1",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-markdown": "^8.0.5",
-    "tailwind-merge": "^1.10.0"
+    "tailwind-merge": "^1.10.0",
+    "uuid": "^11.0.3"
   },
   "devDependencies": {
-    "@types/node": "^18.14.6",
+    "@types/node": "^22.9.0",
     "@types/react": "^18.0.28",
     "@types/react-dom": "^18.0.11",
     "@typescript-eslint/parser": "^5.54.0",
@@ -42,20 +40,10 @@
     "postcss": "^8.4.21",
     "prettier": "^2.8.4",
     "tailwindcss": "^3.2.7",
-    "tsx": "^3.12.3",
+    "tsx": "^3.14.0",
     "typescript": "^4.9.5"
   },
   "engines": {
-    "node": ">=18"
-  },
-  "keywords": [
-    "starter",
-    "gpt4",
-    "typescript",
-    "nextjs",
-    "langchain",
-    "law",
-    "pdf",
-    "openai"
-  ]
+    "node": ">=22"
+  }
 }
